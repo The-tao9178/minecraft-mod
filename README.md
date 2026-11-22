@@ -90,11 +90,6 @@ libs/        MCphone 接口桩（仅编译期）
 tools/       MCphone 联动契约自检脚本
 ```
 
-## 版本说明（1.20.1 Forge 移植版）
-
-- 本目录就是完整的源码工程，可以直接作为仓库根目录使用。
-- 如果仓库里还留着 NeoForge 1.21.1 版的内容，**先把旧的 `src/main/resources/META-INF/neoforge.mods.toml` 删掉**：1.20.1 Forge 读的是 `mods.toml`，两份同时存在会混淆。
-- 构建脚本、`gradle.properties`、`settings.gradle` 已按 1.20.1 + Forge 47.4.0 配好；`mods.toml` 里的占位符由 `build.gradle` 的 `processResources` 替换。
 
 ## 致谢与声明
 
