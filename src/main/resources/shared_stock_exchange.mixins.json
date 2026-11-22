@@ -2,11 +2,11 @@
   "required": true,
   "minVersion": "0.8",
   "package": "cn.blockforge.generated.sharedstockexchange.mixin",
-  "compatibilityLevel": "JAVA_21",
+  "compatibilityLevel": "JAVA_17",
   "mixins": [
     "TransmutationInventoryMixin"
   ],
   "injectors": {
-    "defaultRequire": 1
+    "defaultRequire": 0
   }
 }

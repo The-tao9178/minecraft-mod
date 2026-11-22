@@ -1,14 +1,14 @@
 package cn.blockforge.generated.sharedstockexchange.client.mcphone;
 
-import com.november.mcphone.api.client.app.IPhoneApp;
-import com.november.mcphone.api.client.ui.IPhonePage;
 import cn.blockforge.generated.sharedstockexchange.StockExchangeMod;
 import cn.blockforge.generated.sharedstockexchange.client.MarketScreen;
+import com.november.mcphone.api.client.app.IPhoneApp;
+import com.november.mcphone.api.client.ui.IPhonePage;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.neoforged.fml.ModList;
+import net.minecraftforge.fml.ModList;
 
 /**
  * 手机里的「炒股」App —— 装了 MCphone 才会被它扫到。
@@ -24,10 +24,18 @@ import net.neoforged.fml.ModList;
 public final class StockPhoneApp implements IPhoneApp {
     /** App 的稳定标识，命名空间用我们自己的 modid。改了这个玩家的图标位置就重置了 */
     public static final ResourceLocation APP_ID =
-            ResourceLocation.fromNamespaceAndPath(StockExchangeMod.MOD_ID, "stock_market");
+            new ResourceLocation(StockExchangeMod.MOD_ID, "stock_market");
 
     private static final ResourceLocation ICON =
-            ResourceLocation.fromNamespaceAndPath(StockExchangeMod.MOD_ID, "textures/app/stock_market.png");
+            new ResourceLocation(StockExchangeMod.MOD_ID, "textures/app/stock_market.png");
+
+    /** 版本号和描述：手机界面可能每帧都来问一次，查一遍 ModList / 翻译表太浪费，读到就存下来 */
+    private static String cachedVersion;
+    private static String cachedDescription;
+    private static String cachedDescriptionLanguage;
+    /** App 名字同理：主屏每帧给每个图标取一次名字，按语言缓存翻译结果 */
+    private static String cachedNameText;
+    private static String cachedNameLanguage;
 
     /**
      * 复用同一个页面对象。
@@ -43,9 +51,18 @@ public final class StockPhoneApp implements IPhoneApp {
         return APP_ID;
     }
 
+    /**
+     * 手机主屏每帧都会给每个图标取一次名字（{@code getDisplayName().getString()}），
+     * 这里按语言缓存翻译结果；返回的是新建的 literal 组件，调用方想给它加样式也改不到缓存上。
+     */
     @Override
     public Component getDisplayName() {
-        return Component.translatable("app.shared_stock_exchange.stock_market");
+        String language = Minecraft.getInstance().getLanguageManager().getSelected();
+        if (cachedNameText == null || !language.equals(cachedNameLanguage)) {
+            cachedNameLanguage = language;
+            cachedNameText = Component.translatable("app.shared_stock_exchange.stock_market").getString();
+        }
+        return Component.literal(cachedNameText);
     }
 
     @Override
@@ -97,12 +114,15 @@ public final class StockPhoneApp implements IPhoneApp {
         return true;
     }
 
-    /** 版本号从模组自己的元数据里读，以后换版本不用回来改这里 */
+    /** 版本号从模组自己的元数据里读，以后换版本不用回来改这里；读一次就缓存 */
     @Override
     public String getVersion() {
-        return ModList.get().getModContainerById(StockExchangeMod.MOD_ID)
-                .map(container -> container.getModInfo().getVersion().toString())
-                .orElse("1.0.0");
+        if (cachedVersion == null) {
+            cachedVersion = ModList.get().getModContainerById(StockExchangeMod.MOD_ID)
+                    .map(container -> container.getModInfo().getVersion().toString())
+                    .orElse("1.0.0");
+        }
+        return cachedVersion;
     }
 
     @Override
@@ -110,8 +130,14 @@ public final class StockPhoneApp implements IPhoneApp {
         return "AutoMods";
     }
 
+    /** 描述跟着语言走，但只在语言真的变过之后重新拼一次 */
     @Override
     public String getDescription() {
-        return Component.translatable("app.shared_stock_exchange.stock_market.desc").getString();
+        String language = Minecraft.getInstance().getLanguageManager().getSelected();
+        if (cachedDescription == null || !language.equals(cachedDescriptionLanguage)) {
+            cachedDescriptionLanguage = language;
+            cachedDescription = Component.translatable("app.shared_stock_exchange.stock_market.desc").getString();
+        }
+        return cachedDescription;
     }
 }
