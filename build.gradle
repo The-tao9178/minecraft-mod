@@ -1,27 +1,69 @@
 plugins {
-    id 'java-library'
-    id 'net.neoforged.moddev' version '2.0.143'
+    id 'java'
+    id 'eclipse'
+    id 'idea'
+    // ForgeGradle 6：Minecraft 1.20.1 / Forge 47.4.0 的官方构建插件
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
 }
+
 version = mod_version
 group = mod_group_id
 base { archivesName = mod_id }
-java.toolchain.languageVersion = JavaLanguageVersion.of(21)
-neoForge {
-    version = project.neo_version
-    runs { client { client() }; server { server(); programArgument '--nogui' } }
-    mods { "${mod_id}" { sourceSet(sourceSets.main) } }
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    mappings channel: 'official', version: minecraft_version
+    copyIdeResources = true
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.console.level', 'debug'
+            mods {
+                "${mod_id}" { source sourceSets.main }
+            }
+        }
+        client {}
+        server { args '--nogui' }
+    }
 }
-// MCphone 联动：只用它的公开 api 包认接口，运行时由玩家装着的 MCphone 提供真身。
-// compileOnly —— 这些类不会被打进我们的 jar，没装 MCphone 时我们的 jar 里也没有它们的副本。
+
+repositories {
+    maven { name = 'MinecraftForge'; url = 'https://maven.minecraftforge.net/' }
+    mavenCentral()
+}
+
 dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    // MCphone 联动：只拿它公开的 api 包来编译，运行时由玩家装着的 MCphone 提供真身。
+    // compileOnly 意味着这些类不会被打进我们的 jar —— 没装 MCphone 时我们绝不带着它的副本。
     compileOnly files('libs/mcphone-api-stub.jar')
 }
+
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
-processResources {
-    def props = [minecraft_version: minecraft_version, minecraft_version_range: minecraft_version_range,
-                 neo_version: neo_version, loader_version_range: loader_version_range,
-                 mod_id: mod_id, mod_name: mod_name, mod_license: mod_license, mod_version: mod_version]
+
+// mods.toml 里的 ${mod_id} 之类在这里替换成真实值
+tasks.named('processResources', ProcessResources).configure {
+    def props = [mod_id: mod_id, mod_name: mod_name, mod_version: mod_version,
+                 minecraft_version: minecraft_version, forge_version: forge_version]
     inputs.properties props
     filteringCharset = 'UTF-8'
-    filesMatching('META-INF/neoforge.mods.toml') { expand props }
+    filesMatching('META-INF/mods.toml') { expand props }
+}
+
+// 等价交换的转化桌会把负数 EMC 夹成 0（欠款一卖东西就清零），需要 mixin 接管它的写入。
+// Forge 1.20.1 通过 jar 清单里的 MixinConfigs 找到这份配置；配置本身在 resources 里。
+tasks.named('jar', Jar).configure {
+    manifest {
+        attributes(
+            'Specification-Title': mod_id,
+            'Specification-Vendor': 'AutoMods',
+            'Specification-Version': '1',
+            'Implementation-Title': project.name,
+            'Implementation-Version': project.version,
+            'Implementation-Vendor': 'AutoMods',
+            'MixinConfigs': 'shared_stock_exchange.mixins.json'
+        )
+    }
+    finalizedBy 'reobfJar'
 }

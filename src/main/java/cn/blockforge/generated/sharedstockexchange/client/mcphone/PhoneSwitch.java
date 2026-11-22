@@ -4,11 +4,11 @@ import cn.blockforge.generated.sharedstockexchange.StockExchangeMod;
 import cn.blockforge.generated.sharedstockexchange.client.MarketScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.ModList;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.ModList;
+import net.minecraftforge.fml.common.Mod;
 
 /**
  * 「手机界面」和「大屏界面」之间来回切。
@@ -23,7 +23,7 @@ import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
  * 因为我们从头到尾只拿着一个 {@code Screen} 对象，没去碰它的手机界面实现。
  * 没装 MCphone 时没人会记住手机界面，大屏上的切换按钮也就不出现，原界面和以前完全一样。
  */
-@EventBusSubscriber(modid = StockExchangeMod.MOD_ID, bus = EventBusSubscriber.Bus.GAME, value = Dist.CLIENT)
+@Mod.EventBusSubscriber(modid = StockExchangeMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.CLIENT)
 public final class PhoneSwitch {
     /** MCphone 的 modid。只用来判断「装没装」，不加载它的任何类 */
     public static final String MCPHONE_MODID = "mcphone";

@@ -8,14 +8,15 @@ import cn.blockforge.generated.sharedstockexchange.market.MarketFormat;
 import cn.blockforge.generated.sharedstockexchange.market.StockDefinition;
 import cn.blockforge.generated.sharedstockexchange.market.Stocks;
 import cn.blockforge.generated.sharedstockexchange.net.MarketActionPayload;
+import cn.blockforge.generated.sharedstockexchange.net.MarketNetworking;
 import cn.blockforge.generated.sharedstockexchange.net.MarketSnapshotPayload;
 import com.november.mcphone.api.client.ui.IPhonePage;
 import com.november.mcphone.api.client.ui.PhoneCanvas;
+import java.util.Arrays;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
-import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
  * 手机里的炒股页 —— 画在 MCphone 的内容区里，和它自带的 App 共用状态栏、导航栏、壁纸。
@@ -30,10 +31,11 @@ import net.neoforged.neoforge.network.PacketDistributor;
  * <p>数据全部来自 {@link MarketCache}（服务器推来的快照），买卖也直接发原本的网络包，
  * 所以手机里看到的盘面、成交价、手续费与交易终端里完全一致，不是另做一套。
  *
- * <p>性能上有三处刻意的处理：<br>
+ * <p>性能上有四处刻意的处理：<br>
  * 1. 价格、涨跌、股票名这些文字只在快照或语言变过之后重算一次，不每帧拼字符串；<br>
- * 2. 列表只画视口里的那几行，整行在屏幕外就跳过——裁剪只是保证画不出去，不替你省绘制；<br>
- * 3. 行情同步按 tick 节流，40 tick（两秒）才向服务器要一次，不是每帧都发。
+ * 2. 名字按当前手机宽度裁一次、价格量一次宽度，渲染循环里只画不算，别每帧对 8 行重复量字宽；<br>
+ * 3. 列表只画视口里的那几行，整行在屏幕外就跳过——裁剪只是保证画不出去，不替你省绘制；<br>
+ * 4. 行情同步按 tick 节流，40 tick（两秒）才向服务器要一次，不是每帧都发。
  */
 public final class StockAppPage implements IPhonePage {
     /** 列表一行多高。物品图标是 16×16，行高跟它对齐 */
@@ -47,11 +49,16 @@ public final class StockAppPage implements IPhonePage {
     /** 走势图最高画多高，大屏上别拉成一片 */
     private static final int CHART_MAX_H = 48;
 
+    /** 快捷数量按钮上的固定数字。第四个「全部」要跟着语言走，单独拼 */
+    private static final String[] QUICK_LABELS = {"1", "10", "100"};
+
     /** 当前打开的股票下标，-1 表示在列表视图 */
     private int selected = -1;
     private int scroll;
     private int quantity = 1;
     private int syncTimer;
+    /** 上一次向服务器要行情的时间（毫秒）。渲染路径和 tick 路径都会到期，靠它保证一秒内只发一次 */
+    private long lastSyncMs;
 
     // ---- 文字缓存：只有快照对象换过（或语言变了）才重算 ----
     private MarketSnapshotPayload formattedFor;
@@ -64,6 +71,16 @@ public final class StockAppPage implements IPhonePage {
     private String pnlText = "";
     /** 缓存这些字符串时游戏用的是哪种语言 */
     private String cachedLanguage = "";
+
+    // ---- 行内文字的尺子缓存：名字裁到多宽、价格占多少像素，只有快照 / 语言 / 手机宽度变了才重量 ----
+    /** 列表每行实际画出来的名字（已经按可用宽度裁好） */
+    private String[] displayNames = new String[0];
+    private int[] priceWidth = new int[0];
+    private int[] changeWidth = new int[0];
+    /** 这一批名字是按多宽的手机裁的；换宽度就要重裁 */
+    private int measuredWidth = -1;
+    private int cashWidth;
+    private int pnlWidth;
 
     // ---- 固定在界面上的几个词（「大屏」「全部」「买入」……），语言变了才重取 ----
     private String labelBig = "";
@@ -79,18 +96,47 @@ public final class StockAppPage implements IPhonePage {
     private MarketSnapshotPayload detailFor;
     private int detailIndex = -1;
     private String detailLanguage = "";
+    /** 详情页标题 / 持仓行按多宽裁的，以及盈亏那串数字的宽度 */
+    private int detailWidth = -1;
+    private String detailTitle = "";
+    private String detailHeld = "";
+
+    /** 两个固定小按钮（「大屏」「点一行看详情」）的宽度只跟文字走，量一次就够 */
+    private Font measuredFont;
+    private int labelBigWidth = 20;
+    private int labelTapWidth;
 
     // ---- 这一帧各个可点区域的矩形（绝对屏幕坐标），点击时按它判定 ----
     private final int[] rowY = new int[Stocks.ALL.size()];
     private final int[] rowH = new int[Stocks.ALL.size()];
     private boolean listView = true;
-    private int backX, backY, backW, backH;
-    private int minusX, minusY, minusW, minusH;
-    private int plusX, plusY, plusW, plusH;
-    private int stepOriginX, stepY, stepW, stepH, stepGap;
-    private int buyX, buyY, buyW, buyH, sellX;
+    private int backX;
+    private int backY;
+    private int backW;
+    private int backH;
+    private int minusX;
+    private int minusY;
+    private int minusW;
+    private int minusH;
+    private int plusX;
+    private int plusY;
+    private int plusW;
+    private int plusH;
+    private int stepOriginX;
+    private int stepY;
+    private int stepW;
+    private int stepH;
+    private int stepGap;
+    private int buyX;
+    private int buyY;
+    private int buyW;
+    private int buyH;
+    private int sellX;
     /** 「大屏」切换按钮的位置（列表页和详情页都会重新算一遍） */
-    private int bigX, bigY, bigW, bigH;
+    private int bigX;
+    private int bigY;
+    private int bigW;
+    private int bigH;
 
     // ------------------------------------------------------------------ 渲染入口
 
@@ -99,8 +145,14 @@ public final class StockAppPage implements IPhonePage {
         // 这一帧确实是画在手机界面里的：把那个 Screen 记下来，大屏上的「手机」按钮才知道该回哪儿。
         // 里面只有一次引用比较，不会每帧都赋值。
         PhoneSwitch.remember(Minecraft.getInstance().screen);
+        // 兜底：万一某个版本的 MCphone 不调 tick()，光靠 onOpen 那一次，页面开着时价格就不动了。
+        // 这里按真实时间补一次（两秒一次，和 tick 的节奏一致），不会额外多发包。
+        if (System.currentTimeMillis() - this.lastSyncMs >= SYNC_TICKS * 50L) {
+            this.requestSync();
+        }
         MarketSnapshotPayload snapshot = MarketCache.snapshot();
-        this.refreshText(snapshot);
+        this.refreshText(snapshot, canvas.font());
+        this.measureLabels(canvas.font());
         if (this.selected >= 0 && this.selected < Stocks.ALL.size()) {
             this.renderDetail(canvas, snapshot);
         } else {
@@ -126,7 +178,7 @@ public final class StockAppPage implements IPhonePage {
         graphics.drawString(font, this.cashText, x + 3, y + 2, cashColor, false);
 
         // 右上角「大屏」：点一下换成交易所的大界面，状态栏 / 壁纸留在大屏那边
-        int bigWidth = Math.max(20, font.width(this.labelBig) + 8);
+        int bigWidth = this.labelBigWidth;
         this.bigX = x + width - 3 - bigWidth;
         this.bigY = y + 1;
         this.bigW = bigWidth;
@@ -135,9 +187,9 @@ public final class StockAppPage implements IPhonePage {
                 this.labelBig);
 
         String hint = this.labelTap;
-        int hintWidth = font.width(hint);
+        int hintWidth = this.labelTapWidth;
         int hintX = this.bigX - 4 - hintWidth;
-        if (hintWidth > 0 && hintX > x + 3 + font.width(this.cashText) + 4) {
+        if (hintWidth > 0 && hintX > x + 3 + this.cashWidth + 4) {
             graphics.drawString(font, hint, hintX, y + 2, canvas.style().subtleColor(), false);
         }
 
@@ -151,6 +203,9 @@ public final class StockAppPage implements IPhonePage {
         final int left = x;
         final int visibleTop = listTop;
         final int visibleBottom = listTop + listHeight;
+
+        // 名字按当前手机宽度裁好、价格量好宽度，一帧只做一次；行的循环里直接用
+        this.measureRows(font, rowWidth, snapshot != null);
 
         canvas.clipped(x, listTop, width, listHeight, () -> {
             for (int i = 0; i < Stocks.ALL.size(); i++) {
@@ -173,23 +228,19 @@ public final class StockAppPage implements IPhonePage {
 
                 graphics.renderItem(StockIcons.of(definition), left + 4, top);
                 int textY = top + (ROW_H - 8) / 2;
-                String name = i < this.names.length ? this.names[i] : stockName(i);
 
                 // 名字的右边界跟着价格列的实际宽度走：价格数字变长时先裁名字，绝不叠在一起
-                int nameMax;
                 if (snapshot != null) {
                     String price = i < this.priceText.length ? this.priceText[i] : "-";
                     String changeLabel = i < this.changeText.length ? this.changeText[i] : "-";
-                    int priceX = left + rowWidth - 30 - font.width(price);
-                    nameMax = priceX - (left + 22) - 2;
-                    graphics.drawString(font, price, priceX, textY, changeColor, false);
-                    graphics.drawString(font, changeLabel, left + rowWidth - 3 - font.width(changeLabel),
+                    graphics.drawString(font, price, left + rowWidth - 30 - this.priceWidthAt(i),
                             textY, changeColor, false);
+                    graphics.drawString(font, changeLabel,
+                            left + rowWidth - 3 - this.changeWidthAt(i), textY, changeColor, false);
                 } else {
-                    nameMax = rowWidth - 22 - 26;
                     graphics.drawString(font, "--", left + rowWidth - 24, textY, palette.dim(), false);
                 }
-                graphics.drawString(font, font.plainSubstrByWidth(name, Math.max(8, nameMax)),
+                graphics.drawString(font, this.displayNameAt(i),
                         left + 22, textY, canvas.style().bodyColor(), false);
 
                 this.rowY[i] = top;
@@ -217,10 +268,10 @@ public final class StockAppPage implements IPhonePage {
         int index = this.selected;
 
         this.listView = false;
-        this.ensureDetailText(snapshot, index);
+        this.ensureDetailText(snapshot, index, font, width);
 
         // 返回条：左边「‹ 列表」，右边「大屏」。两块各点各的，返回区让开按钮
-        int bigWidth = Math.max(20, font.width(this.labelBig) + 8);
+        int bigWidth = this.labelBigWidth;
         this.bigX = x + width - 3 - bigWidth;
         this.bigY = y + 1;
         this.bigW = bigWidth;
@@ -241,12 +292,11 @@ public final class StockAppPage implements IPhonePage {
         float change = snapshot == null ? 0.0F : snapshot.changeOf(index);
         int changeColor = change >= 0.0F ? palette.up() : palette.down();
         int titleY = y + BACK_H + 2;
-        String detailName = index < this.names.length ? this.names[index] : stockName(index);
-        graphics.drawString(font, font.plainSubstrByWidth(detailName, width - 48),
-                x + 3, titleY, palette.title(), false);
+        graphics.drawString(font, this.detailTitle, x + 3, titleY, palette.title(), false);
         if (snapshot != null) {
             String label = index < this.changeText.length ? this.changeText[index] : "-";
-            graphics.drawString(font, label, x + width - 3 - font.width(label), titleY, changeColor, false);
+            graphics.drawString(font, label, x + width - 3 - this.changeWidthAt(index), titleY,
+                    changeColor, false);
             String price = index < this.priceText.length ? this.priceText[index] : "-";
             graphics.drawString(font, price, x + 3, titleY + 10, changeColor, false);
         }
@@ -276,12 +326,10 @@ public final class StockAppPage implements IPhonePage {
 
         // 持仓 / 盈亏
         int infoLineY = chartTop + chartHeight + 3;
-        int pnlOffset = this.pnlText.isEmpty() ? 0 : font.width(this.pnlText) + 6;
-        graphics.drawString(font, font.plainSubstrByWidth(this.heldText, Math.max(8, width - 6 - pnlOffset)),
-                x + 3, infoLineY, canvas.style().bodyColor(), false);
+        graphics.drawString(font, this.detailHeld, x + 3, infoLineY, canvas.style().bodyColor(), false);
         if (!this.pnlText.isEmpty()) {
             int pnlColor = this.pnlText.startsWith("-") ? palette.down() : palette.up();
-            graphics.drawString(font, this.pnlText, x + width - 3 - font.width(this.pnlText),
+            graphics.drawString(font, this.pnlText, x + width - 3 - this.pnlWidth,
                     infoLineY, pnlColor, false);
         }
 
@@ -474,8 +522,14 @@ public final class StockAppPage implements IPhonePage {
     }
 
     private void requestSync() {
+        // tick 与渲染两条路可能同时到期；一秒内只发一次，别让服务器每帧都收到同步请求
+        long now = System.currentTimeMillis();
+        if (this.lastSyncMs != 0L && now - this.lastSyncMs < 1000L) {
+            return;
+        }
+        this.lastSyncMs = now;
         if (Minecraft.getInstance().getConnection() != null) {
-            PacketDistributor.sendToServer(new MarketActionPayload(MarketActionPayload.ACTION_SYNC, "", 0));
+            MarketNetworking.sendToServer(new MarketActionPayload(MarketActionPayload.ACTION_SYNC, "", 0));
         }
     }
 
@@ -484,7 +538,7 @@ public final class StockAppPage implements IPhonePage {
             return;
         }
         StockDefinition definition = Stocks.ALL.get(this.selected);
-        PacketDistributor.sendToServer(new MarketActionPayload(
+        MarketNetworking.sendToServer(new MarketActionPayload(
                 buying ? MarketActionPayload.ACTION_BUY : MarketActionPayload.ACTION_SELL,
                 definition.id(), Math.max(1, this.quantity)));
     }
@@ -513,7 +567,7 @@ public final class StockAppPage implements IPhonePage {
 
     // ------------------------------------------------------------------ 文字缓存
 
-    private void refreshText(MarketSnapshotPayload snapshot) {
+    private void refreshText(MarketSnapshotPayload snapshot, Font font) {
         String language = currentLanguage();
         if (snapshot == this.formattedFor && language.equals(this.cachedLanguage)) {
             return;
@@ -527,28 +581,84 @@ public final class StockAppPage implements IPhonePage {
             this.priceText = new String[count];
             this.changeText = new String[count];
             this.names = new String[count];
+            this.priceWidth = new int[count];
+            this.changeWidth = new int[count];
         }
         for (int i = 0; i < count; i++) {
             this.names[i] = stockName(i);
         }
         if (snapshot == null) {
             this.cashText = this.labelWaiting;
-            java.util.Arrays.fill(this.priceText, "-");
-            java.util.Arrays.fill(this.changeText, "-");
-            return;
-        }
-        this.cashText = Component.translatable("app.shared_stock_exchange.stock_market.cash",
-                MarketFormat.emc(snapshot.balance())).getString();
-        for (int i = 0; i < count; i++) {
-            // 防御一下：快照长度理论上和股票表一致，真对不上也别让界面抛数组越界
-            if (i < snapshot.prices().length) {
-                this.priceText[i] = MarketFormat.emc(snapshot.prices()[i]);
-                this.changeText[i] = MarketFormat.percentShort(snapshot.changeOf(i));
-            } else {
-                this.priceText[i] = "-";
-                this.changeText[i] = "-";
+            Arrays.fill(this.priceText, "-");
+            Arrays.fill(this.changeText, "-");
+        } else {
+            this.cashText = Component.translatable("app.shared_stock_exchange.stock_market.cash",
+                    MarketFormat.emc(snapshot.balance())).getString();
+            for (int i = 0; i < count; i++) {
+                // 防御一下：快照长度理论上和股票表一致，真对不上也别让界面抛数组越界
+                if (i < snapshot.prices().length) {
+                    this.priceText[i] = MarketFormat.emc(snapshot.prices()[i]);
+                    this.changeText[i] = MarketFormat.percentShort(snapshot.changeOf(i));
+                } else {
+                    this.priceText[i] = "-";
+                    this.changeText[i] = "-";
+                }
             }
         }
+        // 价格 / 涨跌的像素宽也只量这一次，列表和详情页都直接用
+        this.cashWidth = font.width(this.cashText);
+        for (int i = 0; i < count; i++) {
+            this.priceWidth[i] = font.width(this.priceText[i]);
+            this.changeWidth[i] = font.width(this.changeText[i]);
+        }
+        // 快照 / 语言变了，按宽度裁好的名字和详情页的文字作废，下一帧重算
+        this.measuredWidth = -1;
+        this.detailWidth = -1;
+    }
+
+    /**
+     * 列表每行要画的名字按当前宽度裁一次。
+     *
+     * <p>以前是每帧对 8 行各量一遍字宽、再裁一遍字符串；名字和价格的宽度其实只在
+     * 「快照换了 / 换了语言 / 手机宽度变了」时才变，量一次存起来，渲染循环里只管画。
+     */
+    private void measureRows(Font font, int width, boolean hasSnapshot) {
+        if (this.measuredWidth == width) {
+            return;
+        }
+        this.measuredWidth = width;
+        int count = this.names.length;
+        if (this.displayNames.length != count) {
+            this.displayNames = new String[count];
+        }
+        for (int i = 0; i < count; i++) {
+            int nameMax = hasSnapshot ? width - 30 - this.priceWidthAt(i) - 22 - 2 : width - 22 - 26;
+            this.displayNames[i] = font.plainSubstrByWidth(this.names[i], Math.max(8, nameMax));
+        }
+    }
+
+    /** 「大屏」「点一行看详情」两处固定文字的宽度，换字体或换语言才重量 */
+    private void measureLabels(Font font) {
+        if (this.measuredFont == font) {
+            return;
+        }
+        this.measuredFont = font;
+        this.labelBigWidth = Math.max(20, font.width(this.labelBig) + 8);
+        this.labelTapWidth = font.width(this.labelTap);
+    }
+
+    private int priceWidthAt(int index) {
+        return index >= 0 && index < this.priceWidth.length ? this.priceWidth[index] : 0;
+    }
+
+    private int changeWidthAt(int index) {
+        return index >= 0 && index < this.changeWidth.length ? this.changeWidth[index] : 0;
+    }
+
+    private String displayNameAt(int index) {
+        return index >= 0 && index < this.displayNames.length
+                ? this.displayNames[index]
+                : stockName(index);
     }
 
     /** 界面上固定不动的那些词，只在语言变了之后重取一次 */
@@ -561,23 +671,31 @@ public final class StockAppPage implements IPhonePage {
         this.labelBack = text("back");
         this.labelDebt = text("debt");
         this.labelWaiting = text("waiting");
+        // 词换了，按词量出来的宽度也跟着作废
+        this.measuredFont = null;
     }
 
     /**
-     * 详情页那两行持仓文字，跟着「选中哪只 + 哪份快照」变。
-     * 以前是每帧都拼一遍翻译再拼数字，现在只在这两个东西换过（或语言变了）时算一次。
+     * 详情页那几行文字，跟着「选中哪只 + 哪份快照 + 手机宽度」变。
+     * 以前是每帧都拼一遍翻译、再量一遍字宽；现在只在这几个东西换过（或语言变了）时算一次。
      */
-    private void ensureDetailText(MarketSnapshotPayload snapshot, int index) {
+    private void ensureDetailText(MarketSnapshotPayload snapshot, int index, Font font, int width) {
         String language = this.cachedLanguage;
-        if (snapshot == this.detailFor && index == this.detailIndex && language.equals(this.detailLanguage)) {
+        if (snapshot == this.detailFor && index == this.detailIndex && width == this.detailWidth
+                && language.equals(this.detailLanguage)) {
             return;
         }
         this.detailFor = snapshot;
         this.detailIndex = index;
+        this.detailWidth = width;
         this.detailLanguage = language;
+        String name = index >= 0 && index < this.names.length ? this.names[index] : "";
+        this.detailTitle = font.plainSubstrByWidth(name, width - 48);
         if (snapshot == null || index < 0 || index >= snapshot.holdings().length) {
             this.heldText = "";
             this.pnlText = "";
+            this.detailHeld = "";
+            this.pnlWidth = 0;
             return;
         }
         long held = snapshot.holdings()[index];
@@ -589,6 +707,9 @@ public final class StockAppPage implements IPhonePage {
         } else {
             this.pnlText = "";
         }
+        this.pnlWidth = this.pnlText.isEmpty() ? 0 : font.width(this.pnlText);
+        int pnlOffset = this.pnlText.isEmpty() ? 0 : this.pnlWidth + 6;
+        this.detailHeld = font.plainSubstrByWidth(this.heldText, Math.max(8, width - 6 - pnlOffset));
     }
 
     private static String stockName(int index) {
@@ -598,9 +719,6 @@ public final class StockAppPage implements IPhonePage {
     private static String text(String key) {
         return Component.translatable("app.shared_stock_exchange.stock_market." + key).getString();
     }
-
-    /** 快捷数量按钮上的固定数字。第四个「全部」要跟着语言走，单独拼 */
-    private static final String[] QUICK_LABELS = {"1", "10", "100"};
 
     private static String currentLanguage() {
         return Minecraft.getInstance().getLanguageManager().getSelected();

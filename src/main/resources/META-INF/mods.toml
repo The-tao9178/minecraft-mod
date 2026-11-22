@@ -1,0 +1,35 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="AutoMods"
+description='''全服共享行情的证券交易所：用等价交换（ProjectE）的 EMC 买股票，别人买入会推高市值，卖出会压低。'''
+[[dependencies.${mod_id}]]
+modId="forge"
+mandatory=true
+versionRange="[47,)"
+ordering="NONE"
+side="BOTH"
+[[dependencies.${mod_id}]]
+modId="minecraft"
+mandatory=true
+versionRange="[${minecraft_version}]"
+ordering="NONE"
+side="BOTH"
+[[dependencies.${mod_id}]]
+modId="projecte"
+mandatory=false
+versionRange="*"
+ordering="AFTER"
+side="BOTH"
+# 可选的手机联动（MCphone）：装了它，我们的 jar 里那份 SPI 名单会让手机多出一个「炒股」App，
+# 同时把交易所手册导出到它的书城目录；没装就什么都不做，不影响任何原有功能。
+[[dependencies.${mod_id}]]
+modId="mcphone"
+mandatory=false
+versionRange="*"
+ordering="AFTER"
+side="CLIENT"

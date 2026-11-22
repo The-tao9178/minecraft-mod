@@ -1,6 +1,6 @@
 {
   "pack": {
-    "pack_format": 34,
-    "description": "Shared Stock Exchange - a server-wide stock market paid with ProjectE EMC"
+    "pack_format": 15,
+    "description": "共享证券交易所 resources"
   }
 }

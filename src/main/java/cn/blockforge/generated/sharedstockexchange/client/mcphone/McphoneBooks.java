@@ -2,18 +2,17 @@ package cn.blockforge.generated.sharedstockexchange.client.mcphone;
 
 import cn.blockforge.generated.sharedstockexchange.StockExchangeMod;
 import cn.blockforge.generated.sharedstockexchange.client.GuideBook;
-import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.ModList;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
-import net.neoforged.neoforge.client.event.ClientTickEvent;
-
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.ModList;
+import net.minecraftforge.fml.common.Mod;
 
 /**
  * 把交易所手册放进 MCphone 的「阅读」App（书城）里。
@@ -31,21 +30,21 @@ import java.nio.file.Path;
  * <p>写文件只在内容真的变了的时候发生（比如模组更新了教程、或者玩家换了语言），
  * 平时进游戏一次磁盘写入都没有。
  */
-@EventBusSubscriber(modid = StockExchangeMod.MOD_ID, bus = EventBusSubscriber.Bus.GAME, value = Dist.CLIENT)
+@Mod.EventBusSubscriber(modid = StockExchangeMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.CLIENT)
 public final class McphoneBooks {
     /** MCphone 的 modid，同时也是它书城目录的第一层 */
     private static final String MCPHONE_MODID = "mcphone";
     /** 书城把书放在 {@code <游戏目录>/mcphone/books/} 下（对应它内部的 PhonePaths.BOOKS） */
     private static final String BOOKS_DIR = "books";
 
-    private McphoneBooks() {
-    }
-
     /** 进世界后等这么多 tick 再写，错开「刚进世界」那段最忙的时候（单位：客户端 tick） */
     private static final int EXPORT_DELAY_TICKS = 100;
 
     /** 还剩多少 tick 才导出；-1 表示没有排队 */
     private static int pendingTicks = -1;
+
+    private McphoneBooks() {
+    }
 
     /**
      * 玩家登录客户端时排一次导出。
@@ -61,7 +60,11 @@ public final class McphoneBooks {
 
     /** 到点了就导出一次，然后把排队标记清掉（之后不再每 tick 检查） */
     @SubscribeEvent
-    public static void onClientTick(ClientTickEvent.Post event) {
+    public static void onClientTick(TickEvent.ClientTickEvent event) {
+        // 1.20.1 的 Forge 把这个事件在一 tick 的开头和结尾各发一次，只在结尾做事
+        if (event.phase != TickEvent.Phase.END) {
+            return;
+        }
         if (pendingTicks < 0) {
             return;
         }
