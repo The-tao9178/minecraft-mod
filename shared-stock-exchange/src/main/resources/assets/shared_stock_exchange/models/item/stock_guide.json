@@ -1,6 +1,0 @@
-{
-  "parent": "minecraft:item/generated",
-  "textures": {
-    "layer0": "shared_stock_exchange:item/stock_guide"
-  }
-}
