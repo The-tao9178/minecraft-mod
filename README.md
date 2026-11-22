@@ -59,7 +59,7 @@ English: A Forge mod for Minecraft 1.20.1 with a server-wide shared stock market
 - 手机主屏每帧都会来问 App 名字、版本和描述，这些结果按语言缓存，不再每帧查翻译表和 ModList。
 - 手机 App 的行情同步按 tick 节流（两秒一次），渲染路径只做兜底，不会每帧向服务器发包。
 - 手册只在进世界后延迟几秒导出一次，内容没变就不写盘；平时进游戏没有额外磁盘写入。
-- 输入框的边框跟着浅色 / 深色主题走（`client/ThemeEditBox.java`），不再出现原版那种白边。
+- 输入框的边框跟着浅色 / 深色主题走（`client/ThemeEditBox.java`）。
 
 ## 从源码构建
 
